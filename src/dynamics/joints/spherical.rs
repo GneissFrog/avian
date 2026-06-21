@@ -1,5 +1,5 @@
 use crate::{
-    dynamics::joints::{EntityConstraint, JointSystems},
+    dynamics::joints::{EntityConstraint, JointSystems, motor::AngularMotor},
     prelude::*,
 };
 use bevy::{
@@ -58,6 +58,26 @@ pub struct SphericalJoint {
     pub swing_compliance: Scalar,
     /// The compliance for twist (inverse of stiffness, N * m / rad).
     pub twist_compliance: Scalar,
+    /// A motor for driving the relative orientation of the bodies towards [`target_orientation`](Self::target_orientation).
+    ///
+    /// Unlike the 1-DOF [`RevoluteJoint`] motor, the spherical motor is a full 3-DOF angular motor:
+    /// it drives the relative rotation of the joint frames towards a target *quaternion* rather than a
+    /// scalar angle. It reuses [`AngularMotor`] for its model, gains, `enabled` flag, and `max_torque`;
+    /// the scalar [`target_position`](AngularMotor::target_position) /
+    /// [`target_velocity`](AngularMotor::target_velocity) fields are **unused** for this joint (the
+    /// orientation target lives in [`target_orientation`](Self::target_orientation), and the target
+    /// relative angular velocity is assumed to be zero).
+    ///
+    /// avian 0.6 ships motors for revolute and prismatic joints only; this spherical motor is an
+    /// extension added for animation-driven (active) ragdolls.
+    pub motor: AngularMotor,
+    /// The target relative rotation the [`motor`](Self::motor) drives towards, expressed as the desired
+    /// rotation of the second body's joint frame relative to the first body's joint frame
+    /// (i.e. the desired value of `(rotation1 * basis1)⁻¹ * (rotation2 * basis2)`).
+    ///
+    /// [`Quaternion::IDENTITY`] drives the frames into alignment. Only used when the
+    /// [`motor`](Self::motor) is enabled.
+    pub target_orientation: Quaternion,
 }
 
 impl EntityConstraint<2> for SphericalJoint {
@@ -84,6 +104,8 @@ impl SphericalJoint {
             point_compliance: 0.0,
             swing_compliance: 0.0,
             twist_compliance: 0.0,
+            motor: AngularMotor::new_disabled(MotorModel::DEFAULT),
+            target_orientation: Quaternion::IDENTITY,
         }
     }
 
@@ -315,6 +337,20 @@ impl SphericalJoint {
     #[inline]
     pub const fn with_twist_compliance(mut self, compliance: Scalar) -> Self {
         self.twist_compliance = compliance;
+        self
+    }
+
+    /// Sets the [`motor`](Self::motor) for driving the relative orientation of the bodies.
+    #[inline]
+    pub const fn with_motor(mut self, motor: AngularMotor) -> Self {
+        self.motor = motor;
+        self
+    }
+
+    /// Sets the [`target_orientation`](Self::target_orientation) the [`motor`](Self::motor) drives towards.
+    #[inline]
+    pub const fn with_target_orientation(mut self, target_orientation: Quaternion) -> Self {
+        self.target_orientation = target_orientation;
         self
     }
 }

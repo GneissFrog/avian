@@ -851,3 +851,108 @@ fn prismatic_motor_combined_position_velocity() {
         displacement
     );
 }
+
+/// Tests that the 3-DOF spherical motor drives the relative orientation towards its target.
+#[cfg(feature = "3d")]
+#[test]
+fn spherical_motor_orientation_target() {
+    let mut app = create_app();
+    app.finish();
+
+    let anchor = app
+        .world_mut()
+        .spawn((RigidBody::Static, Position(Vector::ZERO)))
+        .id();
+
+    let dynamic = app
+        .world_mut()
+        .spawn((
+            RigidBody::Dynamic,
+            Position(Vector::X * 2.0),
+            Mass(1.0),
+            AngularInertia::new(Vec3::splat(1.0)),
+        ))
+        .id();
+
+    // A spherical joint whose motor targets a 1.0 rad rotation about the Z axis.
+    let target = Quaternion::from_axis_angle(Vector::Z, 1.0);
+    app.world_mut().spawn(
+        SphericalJoint::new(anchor, dynamic)
+            .with_motor(AngularMotor {
+                max_torque: Scalar::MAX,
+                motor_model: MotorModel::SpringDamper {
+                    frequency: 3.0,
+                    damping_ratio: 1.0,
+                },
+                ..default()
+            })
+            .with_target_orientation(target),
+    );
+
+    app.update();
+
+    // Run for 3 seconds to settle.
+    let steps = (3.0 / TIMESTEP) as usize;
+    for _ in 0..steps {
+        app.update();
+    }
+
+    let rotation = app.world().entity(dynamic).get::<Rotation>().unwrap();
+    let error = rotation.0.angle_between(target);
+    assert!(
+        error < 0.2,
+        "Spherical motor should drive the body to the target orientation (error {error} rad)"
+    );
+}
+
+/// Tests that the spherical motor's `max_torque` limits how fast it can drive the body.
+#[cfg(feature = "3d")]
+#[test]
+fn spherical_motor_torque_limit() {
+    let mut app = create_app();
+    app.finish();
+
+    let anchor = app
+        .world_mut()
+        .spawn((RigidBody::Static, Position(Vector::ZERO)))
+        .id();
+
+    let dynamic = app
+        .world_mut()
+        .spawn((
+            RigidBody::Dynamic,
+            Position(Vector::X * 2.0),
+            Mass(100.0),
+            AngularInertia::new(Vec3::splat(100.0)),
+        ))
+        .id();
+
+    // A large target orientation but a tiny torque ceiling.
+    let target = Quaternion::from_axis_angle(Vector::Z, 3.0);
+    app.world_mut().spawn(
+        SphericalJoint::new(anchor, dynamic)
+            .with_motor(AngularMotor {
+                max_torque: 0.1,
+                motor_model: MotorModel::AccelerationBased {
+                    stiffness: 0.0,
+                    damping: 1.0,
+                },
+                ..default()
+            })
+            .with_target_orientation(target),
+    );
+
+    app.update();
+
+    let steps = (1.0 / TIMESTEP) as usize;
+    for _ in 0..steps {
+        app.update();
+    }
+
+    let angular_velocity = app.world().entity(dynamic).get::<AngularVelocity>().unwrap();
+    let speed = angular_velocity.0.length();
+    assert!(
+        speed.is_finite() && speed < 5.0,
+        "max_torque should limit the spherical motor's angular speed (got {speed})"
+    );
+}
